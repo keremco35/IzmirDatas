@@ -57,6 +57,73 @@ jobs:
           set -euo pipefail
           xcodebuild -resolvePackageDependencies -project "$PROJECT_PATH" -scheme "$SCHEME" | tee "$LOG_DIR/resolve.log"
 
+      - name: Select an available iOS Simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_ENV" <<'PY'
+          import json, subprocess, re, sys
+          raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"], text=True)
+          data = json.loads(raw)
+          devices_by_runtime = data.get("devices", {})
+          ios_runtimes = []
+          for runtime, devices in devices_by_runtime.items():
+            if ".iOS-" not in runtime:
+              continue
+            m = re.search(r"iOS-(\d+)-(\d+)", runtime)
+            if not m:
+              continue
+            major, minor = int(m.group(1)), int(m.group(2))
+            ios_runtimes.append((major, minor, runtime, devices))
+          ios_runtimes.sort(reverse=True)
+          if not ios_runtimes:
+            print("No iOS simulator runtimes found.", file=sys.stderr)
+            sys.exit(1)
+
+          preferred_name_patterns = [
+            re.compile(r"^iPhone\\s+\\d+\\b"),
+            re.compile(r"^iPhone\\b"),
+          ]
+
+          selected = None
+          for _, _, runtime, devices in ios_runtimes:
+            available = [d for d in devices if d.get("isAvailable", False) and d.get("udid")]
+            if not available:
+              continue
+            # Prefer iPhone, then any device.
+            candidates = []
+            for pat in preferred_name_patterns:
+              candidates = [d for d in available if pat.search(d.get("name", ""))]
+              if candidates:
+                break
+            if not candidates:
+              candidates = available
+            # Prefer newest iPhone number if possible.
+            def sort_key(d):
+              name = d.get("name", "")
+              m = re.search(r"iPhone\\s+(\\d+)", name)
+              num = int(m.group(1)) if m else -1
+              return (num, name)
+            candidates.sort(key=sort_key, reverse=True)
+            selected = (runtime, candidates[0])
+            break
+
+          if not selected:
+            print("No available iOS Simulator device found.", file=sys.stderr)
+            sys.exit(1)
+
+          runtime, device = selected
+          udid = device["udid"]
+          name = device.get("name", "Unknown")
+          dest = f"platform=iOS Simulator,id={udid}"
+          print(f"Selected simulator: {name} ({udid}) @ {runtime}")
+          print(f"DESTINATION={dest}")
+
+          # Export for later steps
+          with open(sys.argv[1], "a", encoding="utf-8") as f:
+            f.write(f"DESTINATION={dest}\\n")
+          PY
+
       - name: Run unit + UI tests (simulator)
         shell: bash
         run: |
@@ -65,7 +132,7 @@ jobs:
             -project "$PROJECT_PATH" \
             -scheme "$SCHEME" \
             -configuration "$BUILD_CONFIGURATION" \
-            -destination "platform=iOS Simulator,name=iPhone 15,OS=latest" \
+            -destination "$DESTINATION" \
             -resultBundlePath "$RESULT_BUNDLE_PATH" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             | tee "$LOG_DIR/test.log"
