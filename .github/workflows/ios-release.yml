@@ -145,11 +145,14 @@ jobs:
 
       - name: Create Unsigned IPA
         run: |
-          cd ${{ env.ARCHIVE_PATH }}/Products/Applications
+          APP_PATH="${{ github.workspace }}/${{ env.ARCHIVE_PATH }}/Products/Applications"
+          IPA_OUTPUT="${{ github.workspace }}/build/IzmirDatas.ipa"
+          
+          cd "$APP_PATH"
           mkdir -p Payload
-          mv *.app Payload/
-          zip -r ../../../IzmirDatas.ipa Payload
-          mv ../../../IzmirDatas.ipa ${{ github.workspace }}/build/
+          cp -R *.app Payload/
+          zip -r "$IPA_OUTPUT" Payload
+          rm -rf Payload
 
       - name: Verify IPA
         run: |
