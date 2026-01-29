@@ -31,8 +31,11 @@ final class IzmirDatasTests: XCTestCase {
         try persistence.saveDatasetPayload(datasetKey: key, payload: payload, lastUpdated: now)
         let loaded = try persistence.loadDatasetPayload(datasetKey: key)
 
+        XCTAssertNotNil(loaded)
         XCTAssertEqual(loaded?.payload, payload)
-        XCTAssertEqual(loaded?.lastUpdated.timeIntervalSince1970, now.timeIntervalSince1970, accuracy: 0.5)
+        if let loadedDate = loaded?.lastUpdated {
+            XCTAssertEqual(loadedDate.timeIntervalSince1970, now.timeIntervalSince1970, accuracy: 0.5)
+        }
     }
 
     func testCKANResolverPrefersCSVResource() async throws {
