@@ -1,0 +1,13 @@
+DerivedData/
+build/
+*.xcuserstate
+*.xcuserdata/
+*.moved-aside
+*.swp
+*.lock
+.DS_Store
+fastlane/report.xml
+fastlane/test_output/
+*.ipa
+*.dSYM.zip
+*.dSYM

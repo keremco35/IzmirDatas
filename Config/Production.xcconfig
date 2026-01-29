@@ -1,0 +1,4 @@
+#include "Shared.xcconfig"
+
+APP_ENVIRONMENT = production
+APP_DISPLAY_NAME = IzmirDatas

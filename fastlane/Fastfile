@@ -1,0 +1,22 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "CI lane (imzalama olmadan): test + archive"
+  lane :ci do
+    project = ENV.fetch("PROJECT_PATH", "IzmirDatas.xcodeproj")
+    scheme = ENV.fetch("SCHEME", "IzmirDatas")
+    configuration = ENV.fetch("BUILD_CONFIGURATION", "Development")
+    derived_data = ENV.fetch("DERIVED_DATA_PATH", "build/DerivedData")
+    result_bundle = ENV.fetch("RESULT_BUNDLE_PATH", "build/TestResults.xcresult")
+    archive_path = ENV.fetch("ARCHIVE_PATH", "build/IzmirDatas.xcarchive")
+    destination = ENV.fetch("DESTINATION", "platform=iOS Simulator,name=iPhone 15,OS=latest")
+
+    sh("mkdir -p build")
+    sh("xcodebuild -version")
+    sh(%(xcodebuild -resolvePackageDependencies -project "#{project}" -scheme "#{scheme}"))
+
+    sh(%(xcodebuild test -project "#{project}" -scheme "#{scheme}" -configuration "#{configuration}" -destination "#{destination}" -derivedDataPath "#{derived_data}" -resultBundlePath "#{result_bundle}" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO))
+
+    sh(%(xcodebuild archive -project "#{project}" -scheme "#{scheme}" -configuration "#{configuration}" -destination "generic/platform=iOS" -archivePath "#{archive_path}" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO))
+  end
+end
