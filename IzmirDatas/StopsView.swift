@@ -1,7 +1,6 @@
 import CoreLocation
 import SwiftUI
 
-@MainActor
 final class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var authorizationStatus: CLAuthorizationStatus
     @Published var lastLocation: CLLocation?
@@ -30,14 +29,21 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        authorizationStatus = manager.authorizationStatus
-        if authorizationStatus == .authorizedAlways || authorizationStatus == .authorizedWhenInUse {
-            startUpdates()
+        let status = manager.authorizationStatus
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.authorizationStatus = status
+            if status == .authorizedAlways || status == .authorizedWhenInUse {
+                self.startUpdates()
+            }
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        lastLocation = locations.last
+        let location = locations.last
+        DispatchQueue.main.async { [weak self] in
+            self?.lastLocation = location
+        }
     }
 }
 
