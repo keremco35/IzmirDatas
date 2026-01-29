@@ -62,10 +62,10 @@ jobs:
           xcodebuild build \
             -project IzmirDatas.xcodeproj \
             -scheme ${{ env.SCHEME }} \
-            -destination "platform=iOS Simulator,name=iPhone 16" \
+            -destination "generic/platform=iOS Simulator" \
             -configuration Development \
             CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=YES
+            ONLY_ACTIVE_ARCH=NO
 
   # ================================
   # Archive & IPA Job
