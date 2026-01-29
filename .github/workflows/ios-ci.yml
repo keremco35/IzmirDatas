@@ -200,7 +200,7 @@ jobs:
           BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
           TIMESTAMP="$(date -u +%Y%m%d_%H%M%S)"
 
-          OUT_DIR="build/ipa"
+          OUT_DIR="$GITHUB_WORKSPACE/build/ipa"
           mkdir -p "$OUT_DIR"
 
           STAGING_DIR="$(mktemp -d)"
@@ -209,10 +209,9 @@ jobs:
 
           IPA_NAME="${APP_NAME}_${VERSION}_${BUILD_NUMBER}_${TIMESTAMP}.ipa"
           IPA_PATH="$OUT_DIR/$IPA_NAME"
-          (cd "$STAGING_DIR" && zip -qr "$(pwd)/../$IPA_PATH" Payload)
           
-          # Fix path for zip
-          mv "$STAGING_DIR/../$IPA_PATH" "$IPA_PATH" 2>/dev/null || true
+          # Create IPA using absolute path
+          (cd "$STAGING_DIR" && zip -qr "$IPA_PATH" Payload)
 
           SHA256="$(shasum -a 256 "$IPA_PATH" | awk '{print $1}')"
 
