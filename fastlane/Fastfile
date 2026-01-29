@@ -9,20 +9,11 @@ platform :ios do
     derived_data = ENV.fetch("DERIVED_DATA_PATH", "build/DerivedData")
     result_bundle = ENV.fetch("RESULT_BUNDLE_PATH", "build/TestResults.xcresult")
     archive_path = ENV.fetch("ARCHIVE_PATH", "build/IzmirDatas.xcarchive")
-    destination = ENV["DESTINATION"]
-    if destination.to_s.strip.empty?
-      destination = sh("python3 - <<'PY'\nimport json, subprocess, re, sys\nraw = subprocess.check_output(['xcrun','simctl','list','devices','available','-j'], text=True)\ndata = json.loads(raw)\ndevices_by_runtime = data.get('devices', {})\nios_runtimes = []\nfor runtime, devices in devices_by_runtime.items():\n  if '.iOS-' not in runtime:\n    continue\n  m = re.search(r'iOS-(\\d+)-(\\d+)', runtime)\n  if not m:\n    continue\n  ios_runtimes.append((int(m.group(1)), int(m.group(2)), runtime, devices))\nios_runtimes.sort(reverse=True)\nif not ios_runtimes:\n  raise SystemExit('No iOS simulator runtimes found')\nselected = None\nfor _, _, runtime, devices in ios_runtimes:\n  available = [d for d in devices if d.get('isAvailable', False) and d.get('udid')]\n  if not available:\n    continue\n  iphones = [d for d in available if d.get('name','').startswith('iPhone')]\n  candidates = iphones if iphones else available\n  def sort_key(d):\n    name = d.get('name','')\n    m = re.search(r'iPhone\\s+(\\d+)', name)\n    num = int(m.group(1)) if m else -1\n    return (num, name)\n  candidates.sort(key=sort_key, reverse=True)\n  selected = candidates[0]\n  break\nif not selected:\n  raise SystemExit('No available iOS Simulator device found')\nudid = selected['udid']\nprint(f'platform=iOS Simulator,id={udid}')\nPY", log: false).strip
-    end
-    udid = destination[/id=([A-F0-9-]+)/, 1]
+    destination = ENV.fetch("DESTINATION", "platform=iOS Simulator,name=Any iOS Simulator Device")
 
     sh("mkdir -p build")
     sh("xcodebuild -version")
     sh(%(xcodebuild -resolvePackageDependencies -project "#{project}" -scheme "#{scheme}"))
-
-    if udid
-      sh(%(xcrun simctl boot "#{udid}" || true))
-      sh(%(xcrun simctl bootstatus "#{udid}" -b))
-    end
 
     sh(%(xcodebuild test -project "#{project}" -scheme "#{scheme}" -configuration "#{configuration}" -destination "#{destination}" -derivedDataPath "#{derived_data}" -resultBundlePath "#{result_bundle}" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO))
 
