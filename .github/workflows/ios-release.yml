@@ -59,24 +59,26 @@ jobs:
       - name: Show Available Simulators
         run: xcrun simctl list devices available
 
-      - name: Build for Testing
+      - name: Boot Simulator
         run: |
-          xcodebuild build-for-testing \
-            -project IzmirDatas.xcodeproj \
-            -scheme ${{ env.SCHEME }} \
-            -destination "platform=iOS Simulator,name=iPhone 16" \
-            -configuration Development \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=YES
+          DEVICE_ID=$(xcrun simctl list devices available | grep "iPhone 16" | head -1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
+          xcrun simctl boot "$DEVICE_ID" || true
+          echo "Waiting for simulator to be ready..."
+          sleep 5
 
-      - name: Run Tests
+      - name: Build & Test
+        timeout-minutes: 10
         run: |
-          xcodebuild test-without-building \
+          xcodebuild test \
             -project IzmirDatas.xcodeproj \
             -scheme ${{ env.SCHEME }} \
             -destination "platform=iOS Simulator,name=iPhone 16" \
             -configuration Development \
-            CODE_SIGNING_ALLOWED=NO
+            -parallel-testing-enabled YES \
+            -maximum-concurrent-test-simulator-destinations 1 \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            -resultBundlePath TestResults.xcresult
 
   # ================================
   # Archive & IPA Job
