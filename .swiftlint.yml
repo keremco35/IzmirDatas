@@ -1,0 +1,84 @@
+# SwiftLint Configuration for IzmirDatas
+
+# Sadece proje kaynak dosyalarını kontrol et
+included:
+  - IzmirDatas
+  - IzmirDatasTests
+  - IzmirDatasUITests
+
+excluded:
+  - .build
+  - build
+  - Pods
+  - DerivedData
+
+# Devre dışı kurallar
+disabled_rules:
+  - trailing_whitespace
+  - todo
+  - orphaned_doc_comment
+
+# Opsiyonel kurallar
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - force_unwrapping
+  - implicit_return
+  - multiline_arguments
+  - multiline_parameters
+  - vertical_whitespace_closing_braces
+
+# Kural yapılandırmaları
+line_length:
+  warning: 120
+  error: 200
+  ignores_comments: true
+  ignores_urls: true
+
+file_length:
+  warning: 500
+  error: 1000
+
+type_body_length:
+  warning: 300
+  error: 500
+
+function_body_length:
+  warning: 50
+  error: 100
+
+function_parameter_count:
+  warning: 6
+  error: 8
+
+identifier_name:
+  min_length:
+    warning: 2
+    error: 1
+  max_length:
+    warning: 50
+    error: 60
+  excluded:
+    - id
+    - x
+    - y
+    - i
+    - j
+    - ok
+
+nesting:
+  type_level: 2
+  function_level: 3
+
+# Cyclomatic complexity
+cyclomatic_complexity:
+  warning: 15
+  error: 25
+
+# Custom kurallar
+custom_rules:
+  no_print_statements:
+    name: "Print Statements"
+    regex: "\\bprint\\s*\\("
+    message: "print() kullanmayın, Logger kullanın"
+    severity: warning

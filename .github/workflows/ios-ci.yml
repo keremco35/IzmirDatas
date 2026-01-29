@@ -2,7 +2,9 @@ name: iOS CI
 
 on:
   push:
+    branches: [main, develop]
   pull_request:
+    branches: [main, develop]
   workflow_dispatch:
     inputs:
       environment:
@@ -19,97 +21,185 @@ concurrency:
   group: ios-ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PROJECT_PATH: IzmirDatas.xcodeproj
+  SCHEME: IzmirDatas
+
 jobs:
-  build-test-package:
+  # ─────────────────────────────────────────────────────────────
+  # SwiftLint - Kod kalitesi kontrolü
+  # ─────────────────────────────────────────────────────────────
+  lint:
+    name: SwiftLint
     runs-on: macos-latest
-    timeout-minutes: 30
-    env:
-      PROJECT_PATH: IzmirDatas.xcodeproj
-      SCHEME: IzmirDatas
-      BUILD_CONFIGURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'Development' }}
-      ARCHIVE_PATH: build/IzmirDatas.xcarchive
-      RESULT_BUNDLE_PATH: build/TestResults.xcresult
-      LOG_DIR: build/logs
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode (15+)
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: swiftlint lint --reporter github-actions-logging
+
+  # ─────────────────────────────────────────────────────────────
+  # Build & Test
+  # ─────────────────────────────────────────────────────────────
+  build-test:
+    name: Build & Test
+    runs-on: macos-latest
+    timeout-minutes: 30
+    needs: lint
+    env:
+      BUILD_CONFIGURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'Development' }}
+      RESULT_BUNDLE_PATH: build/TestResults.xcresult
+      LOG_DIR: build/logs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
 
-      - name: Verify Xcode version
-        shell: bash
+      - name: Xcode Version
         run: |
-          set -euo pipefail
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SPM Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
+            .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Resolve Dependencies
+        run: |
           mkdir -p "$LOG_DIR"
-          xcodebuild -version | tee "$LOG_DIR/xcodebuild-version.log"
-          major="$(xcodebuild -version | head -n 1 | awk '{print $2}' | cut -d. -f1)"
-          if [ "${major:-0}" -lt 15 ]; then
-            echo "Xcode 15+ required, found: $(xcodebuild -version | head -n 1)" >&2
-            exit 1
-          fi
+          xcodebuild -resolvePackageDependencies \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            | tee "$LOG_DIR/resolve.log"
 
-      - name: Resolve dependencies
-        shell: bash
+      - name: Build
         run: |
-          set -euo pipefail
-          xcodebuild -resolvePackageDependencies -project "$PROJECT_PATH" -scheme "$SCHEME" | tee "$LOG_DIR/resolve.log"
+          xcodebuild build \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration "$BUILD_CONFIGURATION" \
+            -destination "platform=iOS Simulator,name=iPhone 16" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            | tee "$LOG_DIR/build.log"
 
-      - name: Run unit + UI tests (simulator)
-        shell: bash
+      - name: Run Tests
         run: |
-          set -euo pipefail
           xcodebuild test \
             -project "$PROJECT_PATH" \
             -scheme "$SCHEME" \
             -configuration "$BUILD_CONFIGURATION" \
-            -destination "platform=iOS Simulator,name=Any iOS Simulator Device" \
+            -destination "platform=iOS Simulator,name=iPhone 16" \
             -resultBundlePath "$RESULT_BUNDLE_PATH" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
             | tee "$LOG_DIR/test.log"
 
-      - name: Archive (generic iOS)
-        shell: bash
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: |
+            ${{ env.RESULT_BUNDLE_PATH }}
+            ${{ env.LOG_DIR }}
+          retention-days: 14
+
+      - name: Test Summary
+        if: always()
         run: |
-          set -euo pipefail
+          echo "## 🧪 Test Sonuçları" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Configuration**: $BUILD_CONFIGURATION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scheme**: $SCHEME" >> $GITHUB_STEP_SUMMARY
+          if [ -d "$RESULT_BUNDLE_PATH" ]; then
+            echo "- **Result Bundle**: ✅ Oluşturuldu" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Result Bundle**: ❌ Bulunamadı" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ─────────────────────────────────────────────────────────────
+  # Archive & IPA (sadece main branch push)
+  # ─────────────────────────────────────────────────────────────
+  archive:
+    name: Archive & IPA
+    runs-on: macos-latest
+    timeout-minutes: 30
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      BUILD_CONFIGURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'Production' }}
+      ARCHIVE_PATH: build/IzmirDatas.xcarchive
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Cache SPM Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
+            .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Resolve Dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME"
+
+      - name: Archive
+        run: |
           xcodebuild archive \
             -project "$PROJECT_PATH" \
             -scheme "$SCHEME" \
             -configuration "$BUILD_CONFIGURATION" \
             -destination "generic/platform=iOS" \
             -archivePath "$ARCHIVE_PATH" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            | tee "$LOG_DIR/archive.log"
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
 
-      - name: Create IPA from /Products/Applications
+      - name: Create IPA
         id: ipa
-        shell: bash
         run: |
-          set -euo pipefail
           APP_DIR="$ARCHIVE_PATH/Products/Applications"
           APP_PATH="$(find "$APP_DIR" -maxdepth 1 -name '*.app' -print -quit)"
+          
           if [ -z "${APP_PATH:-}" ]; then
-            echo "No .app found under: $APP_DIR" >&2
+            echo "❌ .app bulunamadı: $APP_DIR"
             exit 1
           fi
 
           APP_NAME="$(basename "$APP_PATH" .app)"
           INFO_PLIST="$APP_PATH/Info.plist"
-          if [ ! -f "$INFO_PLIST" ]; then
-            echo "Info.plist not found at: $INFO_PLIST" >&2
-            exit 1
-          fi
-
-          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST" || true)"
-          BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST" || true)"
-          if [ -z "${VERSION:-}" ] || [ -z "${BUILD_NUMBER:-}" ]; then
-            echo "Could not read version/build from Info.plist" >&2
-            exit 1
-          fi
-
+          
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
+          BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
           TIMESTAMP="$(date -u +%Y%m%d_%H%M%S)"
+
           OUT_DIR="build/ipa"
           mkdir -p "$OUT_DIR"
 
@@ -119,83 +209,29 @@ jobs:
 
           IPA_NAME="${APP_NAME}_${VERSION}_${BUILD_NUMBER}_${TIMESTAMP}.ipa"
           IPA_PATH="$OUT_DIR/$IPA_NAME"
-          (cd "$STAGING_DIR" && zip -qr "$IPA_PATH" Payload)
+          (cd "$STAGING_DIR" && zip -qr "$(pwd)/../$IPA_PATH" Payload)
+          
+          # Fix path for zip
+          mv "$STAGING_DIR/../$IPA_PATH" "$IPA_PATH" 2>/dev/null || true
 
-          SIZE_BYTES="$(stat -f%z "$IPA_PATH")"
           SHA256="$(shasum -a 256 "$IPA_PATH" | awk '{print $1}')"
-          ABS_PATH="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$IPA_PATH")"
 
           echo "ipa_path=$IPA_PATH" >> "$GITHUB_OUTPUT"
-          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
-          echo "size_bytes=$SIZE_BYTES" >> "$GITHUB_OUTPUT"
-          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
-          echo "abs_path=$ABS_PATH" >> "$GITHUB_OUTPUT"
 
-          {
-            echo "## IPA Raporu"
-            echo ""
-            echo "- Ortam: $BUILD_CONFIGURATION"
-            echo "- Uygulama: $APP_NAME"
-            echo "- Versiyon: $VERSION"
-            echo "- Build: $BUILD_NUMBER"
-            echo "- Zaman (UTC): $TIMESTAMP"
-            echo "- Boyut (byte): $SIZE_BYTES"
-            echo "- SHA256: $SHA256"
-            echo "- Çıktı: $ABS_PATH"
-          } | tee "build/ipa_report.txt" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 📦 IPA Raporu" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Özellik | Değer |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Uygulama | $APP_NAME |" >> $GITHUB_STEP_SUMMARY
+          echo "| Versiyon | $VERSION |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | $BUILD_NUMBER |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA256 | \`${SHA256:0:16}...\` |" >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload artifacts (.ipa + report + xcresult)
-        if: success()
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ios-${{ env.BUILD_CONFIGURATION }}-${{ github.run_number }}
-          path: |
-            ${{ steps.ipa.outputs.ipa_path }}
-            build/ipa_report.txt
-            ${{ env.RESULT_BUNDLE_PATH }}
-            ${{ env.LOG_DIR }}
-
-      - name: Print error logs (tail)
-        if: failure()
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "---- test.log (tail) ----"
-          [ -f "$LOG_DIR/test.log" ] && tail -n 200 "$LOG_DIR/test.log" || true
-          echo "---- archive.log (tail) ----"
-          [ -f "$LOG_DIR/archive.log" ] && tail -n 200 "$LOG_DIR/archive.log" || true
-
-      - name: Notify on failure (PR comment or issue)
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const isPR = context.eventName === 'pull_request'
-            const title = `iOS CI başarısız: ${context.workflow} #${context.runNumber}`
-            const body = [
-              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              `Ref: ${context.ref}`,
-              `Ortam: ${process.env.BUILD_CONFIGURATION}`,
-              '',
-              'Build aşaması başarısız oldu; loglar artifact olarak yüklendiyse Actions ekranından indirilebilir.'
-            ].join('\\n')
-
-            if (isPR) {
-              const pr = context.payload.pull_request
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: `### ${title}\\n\\n${body}`
-              })
-            } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title,
-                body
-              })
-            }
+          name: ipa-${{ steps.ipa.outputs.version }}-${{ github.run_number }}
+          path: build/ipa/*.ipa
+          retention-days: 30
